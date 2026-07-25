@@ -475,13 +475,30 @@ if (sidebar && btnOpenSidebar && btnCloseSidebar) {
  */
 const themeToggleBtn = document.getElementById('theme-toggle-btn');
 if (themeToggleBtn) {
+    // Load saved theme preference
+    const savedTheme = localStorage.getItem('app-theme') || 'light';
+    if (savedTheme === 'dark') {
+        document.documentElement.setAttribute('data-theme', 'dark');
+        const icon = themeToggleBtn.querySelector('i');
+        if (icon) {
+            icon.classList.remove('fa-moon');
+            icon.classList.add('fa-sun');
+        }
+    } else {
+        document.documentElement.setAttribute('data-theme', 'light');
+    }
+
     themeToggleBtn.addEventListener('click', () => {
         try {
-            document.body.classList.toggle('light-mode');
+            const currentTheme = document.documentElement.getAttribute('data-theme') || 'light';
+            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+            
+            document.documentElement.setAttribute('data-theme', newTheme);
+            localStorage.setItem('app-theme', newTheme);
             
             const icon = themeToggleBtn.querySelector('i');
             if (icon) {
-                if (document.body.classList.contains('light-mode')) {
+                if (newTheme === 'dark') {
                     icon.classList.remove('fa-moon');
                     icon.classList.add('fa-sun');
                 } else {
