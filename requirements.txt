@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+opencv-python
+ultralytics
+easyocr
+numpy
+torch
+paddlepaddle-gpu

@@ -1,0 +1,210 @@
+/* Custom CSS Variables and Base styles */
+:root {
+  --color-dark-start: #0f172a;
+  --color-dark-end: #1e293b;
+}
+
+body.tech-bg {
+  background: linear-gradient(135deg, var(--color-dark-start) 0%, var(--color-dark-end) 100%);
+  position: relative;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+}
+
+/* Tech grid overlay styling */
+.grid-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  /* 40x40 grid cells */
+  background-size: 40px 40px;
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Glassmorphism utility for clean UI layout */
+.glassmorphism {
+  background: rgba(15, 23, 42, 0.4);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  box-shadow: 0 4px 30px rgba(0, 0, 0, 0.4);
+}
+
+/* Enhanced glow effects for text and icons */
+.shadow-glow {
+  filter: drop-shadow(0 0 10px rgba(96, 165, 250, 0.8));
+}
+
+/* Live Security Feed CSS container constraints */
+.live-feed-container {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  height: auto;
+}
+
+/* Crosshair overlay added on top of the camera feed */
+.crosshair-overlay {
+  background-image:
+    linear-gradient(to right, rgba(96, 165, 250, 0.15) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(96, 165, 250, 0.15) 1px, transparent 1px);
+  background-size: 20px 20px;
+  background-position: center center;
+}
+
+/* Animation for the blinking REC dot */
+.rec-blink {
+  animation: blink 1.2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes blink {
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0;
+    shadow: 0 0 10px red;
+  }
+}
+
+/* Custom stylised scrollbar for tables */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 8px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.8);
+  border-radius: 4px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(96, 165, 250, 0.2);
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(96, 165, 250, 0.4);
+}
+
+/* Slide-in animation for table rows when a new vehicle is registered */
+@keyframes slideIn {
+  0% {
+    opacity: 0;
+    transform: translateX(40px);
+    background-color: rgba(96, 165, 250, 0.2);
+  }
+
+  70% {
+    background-color: rgba(96, 165, 250, 0.05);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateX(0);
+    background-color: transparent;
+  }
+}
+
+/* The class toggled by JS to trigger animation */
+.row-slide-in {
+  animation: slideIn 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Row simple hover transitions */
+tbody tr {
+  transition: background-color 0.2s ease, transform 0.2s ease;
+}
+
+tbody tr:hover {
+  background-color: rgba(255, 255, 255, 0.04);
+}
+
+/* Light Mode Theme Modifications */
+body.light-mode {
+  background: linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 100%) !important;
+  color: #0f172a !important;
+}
+
+body.light-mode .grid-overlay {
+  background-image:
+    linear-gradient(to right, rgba(0, 0, 0, 0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(0, 0, 0, 0.05) 1px, transparent 1px);
+}
+
+body.light-mode .glassmorphism {
+  background: rgba(255, 255, 255, 0.8) !important;
+  border: 1px solid rgba(0, 0, 0, 0.15) !important;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05) !important;
+}
+
+/* General Text Overrides */
+body.light-mode .text-white { color: #0f172a !important; }
+body.light-mode .text-gray-200 { color: #1e293b !important; }
+body.light-mode .text-gray-300 { color: #334155 !important; }
+body.light-mode .text-gray-400 { color: #475569 !important; }
+body.light-mode .text-blue-100,
+body.light-mode .text-blue-200,
+body.light-mode .text-blue-300,
+body.light-mode .text-blue-400 { color: #1d4ed8 !important; }
+body.light-mode .text-green-400 { color: #16a34a !important; }
+body.light-mode .text-red-400 { color: #dc2626 !important; }
+body.light-mode .text-red-500 { color: #ef4444 !important; }
+
+/* Gradient text adjustments */
+body.light-mode .bg-gradient-to-r.from-blue-400.to-cyan-300 {
+  background-image: linear-gradient(to right, #1d4ed8, #0e7490) !important;
+  -webkit-background-clip: text !important;
+  background-clip: text !important;
+  color: transparent !important;
+}
+
+/* Background Utility Classes Overrides */
+body.light-mode .bg-blue-500\/20 { background-color: rgba(59, 130, 246, 0.15) !important; }
+body.light-mode .bg-red-500\/20 { background-color: rgba(239, 68, 68, 0.15) !important; }
+body.light-mode .bg-green-500\/20 { background-color: rgba(34, 197, 94, 0.15) !important; }
+body.light-mode .bg-gray-500\/20 { background-color: rgba(100, 116, 139, 0.15) !important; }
+body.light-mode .bg-gray-600\/20 { background-color: rgba(71, 85, 105, 0.1) !important; }
+body.light-mode .bg-green-500\/10 { background-color: rgba(34, 197, 94, 0.1) !important; }
+body.light-mode .bg-blue-600\/30 { background-color: rgba(37, 99, 235, 0.15) !important; }
+body.light-mode .bg-gray-600\/30 { background-color: rgba(71, 85, 105, 0.15) !important; }
+
+/* Borders for table and cards */
+body.light-mode .border-blue-500\/20,
+body.light-mode .border-blue-500\/30 { border-color: rgba(59,130,246,0.3) !important; }
+body.light-mode .border-red-500\/20,
+body.light-mode .border-red-500\/30 { border-color: rgba(239,68,68,0.3) !important; }
+body.light-mode .border-green-500\/20,
+body.light-mode .border-green-500\/30 { border-color: rgba(34,197,94,0.3) !important; }
+body.light-mode .border-gray-500\/30 { border-color: rgba(100,116,139,0.3) !important; }
+body.light-mode .border-white\/10 { border-color: rgba(0,0,0,0.15) !important; }
+body.light-mode .border-white\/5 { border-color: rgba(0,0,0,0.08) !important; }
+
+/* Backgrounds for specific components */
+body.light-mode .bg-white\/5 { background-color: rgba(0, 0, 0, 0.04) !important; }
+body.light-mode .hover\:bg-white\/5:hover { background-color: rgba(0, 0, 0, 0.08) !important; }
+body.light-mode .hover\:bg-white\/10:hover { background-color: rgba(0, 0, 0, 0.12) !important; }
+body.light-mode .bg-\[\#162137\] { background-color: #f8fafc !important; }
+body.light-mode .bg-black\/40 { background-color: rgba(255, 255, 255, 0.8) !important; }
+body.light-mode .bg-black\/60,
+body.light-mode .bg-black\/90 { background-color: rgba(255, 255, 255, 0.95) !important; color: #0f172a !important; }
+
+/* Hover effects for groups */
+body.light-mode .group:hover .group-hover\:text-blue-200,
+body.light-mode .group:hover .group-hover\:text-red-200,
+body.light-mode .group:hover .group-hover\:text-green-200 { color: #0f172a !important; }
+
+/* Table styles */
+body.light-mode tbody tr {
+  color: #334155 !important;
+}
+body.light-mode tbody tr:hover {
+  background-color: rgba(0, 0, 0, 0.05) !important;
+}

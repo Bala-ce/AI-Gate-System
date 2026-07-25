@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+
+# Virtual Environment
+.venv/
+venv/
+
+# Cache
+.cache/
+
+# AI Models
+*.pt
+*.onnx
+
+# Test Images
+img to test/
+
+# VS Code
+.vscode/
+
+# Backup files
+main_newbackup.py
