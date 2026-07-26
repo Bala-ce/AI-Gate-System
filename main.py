@@ -558,8 +558,60 @@ def process_vehicle_detection(frame, gate_name: str):
                                 )
                                 print(f"[DEBUG] Bottom-strip retry: plate found conf={conf:.2f} aspect={aspect:.2f}")
 
+            # ---------------------------------------------------------------
+            # OCR bypass for Bus/Truck — last resort when plate_detector
+            # finds nothing at all (model limitation on certain plate formats).
+            #
+            # Strategy: run PaddleOCR directly on 3 horizontal strips of the
+            # bottom 40% of the vehicle crop (bumper zone).  The strict Indian
+            # plate regex inside parse_ocr_results rejects ALL bus body text
+            # (ASHOK LEYLAND, COLLEGE OF ENGG, etc.) so false positives are
+            # structurally impossible.
+            # ---------------------------------------------------------------
+            if best_plate_box is None and vehicle_type in ("Bus", "Truck"):
+                print("[DEBUG] Bus/Truck OCR bypass: scanning bumper strips directly...")
+                crop_h_full, crop_w_full = veh_crop.shape[:2]
+                # Divide the bottom 40% into 3 overlapping strips and try each
+                zone_top = int(crop_h_full * 0.60)   # start of bottom 40%
+                strip_h  = max(1, (crop_h_full - zone_top) // 3)
+                strips = [
+                    veh_crop[zone_top : zone_top + strip_h * 2, :],  # top-of-zone
+                    veh_crop[zone_top + strip_h : , :],              # mid-to-bottom
+                    veh_crop[zone_top : , :],                        # full bottom zone
+                ]
+                for idx, strip in enumerate(strips):
+                    if strip.size == 0:
+                        continue
+                    sw, sh = strip.shape[1], strip.shape[0]
+                    # Upscale so OCR has enough pixels (target height ≥ 60 px)
+                    if sh < 60:
+                        up = 60 / max(1, sh)
+                        strip = cv2.resize(
+                            strip,
+                            (int(sw * up), 60),
+                            interpolation=cv2.INTER_LINEAR,
+                        )
+                    clean_strip = preprocess_plate(strip)
+                    if len(clean_strip.shape) == 2:
+                        clean_strip_bgr = cv2.cvtColor(clean_strip, cv2.COLOR_GRAY2BGR)
+                    else:
+                        clean_strip_bgr = clean_strip
+                    with ocr_lock:
+                        paddle_bypass = ocr_engine.predict(clean_strip_bgr)
+                    bypass_text = parse_ocr_results(paddle_bypass)
+                    if len(bypass_text) > 3:
+                        detected_plates.append((bypass_text, vehicle_type))
+                        print(
+                            f"[DETECTION] OCR-bypass strip-{idx}: {bypass_text}"
+                            f" | Vehicle: {vehicle_type} | Gate: {gate_name}"
+                        )
+                        break  # found — no need to scan remaining strips
+
             # If no plate found inside this vehicle after all attempts — skip
-            if best_plate_box is None:
+            if best_plate_box is None and not any(
+                p for p in detected_plates
+                if p[1] == vehicle_type  # at least one plate was found via bypass
+            ):
                 print(f"[DEBUG] No plate found inside {vehicle_type} crop. Skipping.")
                 continue
 
