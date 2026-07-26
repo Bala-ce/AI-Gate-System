@@ -276,6 +276,65 @@ def preprocess_plate(plate_crop):
     return binary
 
 
+# ============================================================
+# --- CHARACTER CORRECTION MODULE ---
+# ============================================================
+
+
+def normalize_indian_plate(raw: str) -> str:
+    """
+    Applies position-aware character correction for common OCR confusions
+    in Indian vehicle registration number plates.
+
+    Indian plate structure (total length 9 or 10 chars):
+      Positions 0–1       : Letters  — state code      (e.g. TN, MH, KA)
+      Positions 2–3       : Digits   — district code   (e.g. 57, 12, 01)
+      Positions 4 .. n-5  : Letters  — series          (1 or 2 letters)
+      Positions n-4 .. n-1: Digits   — vehicle number  (always 4 digits)
+
+    Corrections applied (only when a character is the wrong type for its slot):
+      At a DIGIT  position: O→0  I→1  L→1  Z→2  S→5  G→6  B→8
+      At a LETTER position: 0→O  1→I  2→Z  5→S  6→G  8→B
+
+    Already-valid characters are NEVER modified.
+    Returns the original string unchanged if length is outside 9-10.
+
+    Examples:
+      TN3BAB1234  →  TN38AB1234   (B at digit pos-3 → 8)
+      TN38A81234  →  TN38AB1234   (8 at letter pos-5 → B)
+      MHIZDE4567  →  MH12DE4567   (I at digit pos-2 → 1, Z at digit pos-3 → 2)
+      IN57BR8817  →  IN57BR8817   (unchanged — all chars already valid for their slot)
+    """
+    n = len(raw)
+    if n < 9 or n > 10:
+        return raw  # Cannot determine plate structure — leave unchanged
+
+    # Last 4 positions are always digits; first 2 and middle section are letters;
+    # positions 2–3 are always digits.
+    digit_positions = {2, 3} | set(range(n - 4, n))
+    letter_positions = set(range(n)) - digit_positions
+
+    # Characters that look like letters but should be digits at digit positions
+    letter_to_digit = {"O": "0", "I": "1", "L": "1", "Z": "2", "S": "5", "G": "6", "B": "8"}
+    # Characters that look like digits but should be letters at letter positions
+    digit_to_letter = {"0": "O", "1": "I", "2": "Z", "5": "S", "6": "G", "8": "B"}
+
+    corrected = list(raw)
+    changed = False
+    for i, ch in enumerate(raw):
+        if i in digit_positions and ch in letter_to_digit:
+            corrected[i] = letter_to_digit[ch]
+            changed = True
+        elif i in letter_positions and ch in digit_to_letter:
+            corrected[i] = digit_to_letter[ch]
+            changed = True
+
+    result = "".join(corrected)
+    if changed:
+        print(f"[DEBUG] Plate correction: {raw!r} → {result!r}")
+    return result
+
+
 def parse_ocr_results(paddle_result):
     """
     Parses PaddleOCR 3.x output (from .predict()) to extract plate text.
@@ -382,11 +441,13 @@ def parse_ocr_results(paddle_result):
 
     # --- Fast path: full concatenation is already 9-10 chars ---
     if 9 <= len(combined_text) <= 10:
-        if _matches(combined_text):
-            print(f"[DEBUG] Accepted final plate: {combined_text}")
-            return combined_text
+        # OCR → Character Correction → Regex Validation → Final Plate
+        corrected = normalize_indian_plate(combined_text)
+        if _matches(corrected):
+            print(f"[DEBUG] Accepted final plate: {corrected}")
+            return corrected
         # Try reversed — handles mirrored webcam feeds
-        reversed_text = combined_text[::-1]
+        reversed_text = corrected[::-1]
         if _matches(reversed_text):
             print(
                 f"[DEBUG] Accepted reversed plate: {reversed_text} (was: {combined_text})"
@@ -396,7 +457,8 @@ def parse_ocr_results(paddle_result):
         return ""
 
     # --- Sliding-window: scan for a 9-10 char plate substring inside a longer string ---
-    # This handles buses where all body text is concatenated with the plate number
+    # This handles buses where all body text is concatenated with the plate number.
+    # Character correction is applied to every candidate window before validation.
     if len(combined_text) > 10:
         print(
             f"[DEBUG] String too long ({len(combined_text)}). Scanning for plate substring..."
@@ -405,14 +467,18 @@ def parse_ocr_results(paddle_result):
         for candidate in (combined_text, combined_text[::-1]):
             for win in (10, 9):
                 for i in range(len(candidate) - win + 1):
-                    substr = candidate[i : i + win]
+                    substr = normalize_indian_plate(candidate[i : i + win])
                     if _matches(substr):
                         print(f"[DEBUG] Found plate substring: {substr}")
                         return substr
         print(f"[DEBUG] No plate pattern found in '{combined_text}'")
         return ""
 
-    # Too short
+    # Too short — try correction in case a digit→letter fix changes nothing structurally
+    corrected = normalize_indian_plate(combined_text)
+    if _matches(corrected):
+        return corrected
+
     print(
         f"[DEBUG] Rejected plate '{combined_text}': length {len(combined_text)} not in 9-10."
     )
@@ -607,13 +673,15 @@ def process_vehicle_detection(frame, gate_name: str):
                         )
                         break  # found — no need to scan remaining strips
 
-            # If no plate found inside this vehicle after all attempts — skip
-            if best_plate_box is None and not any(
-                p for p in detected_plates
-                if p[1] == vehicle_type  # at least one plate was found via bypass
-            ):
-                print(f"[DEBUG] No plate found inside {vehicle_type} crop. Skipping.")
-                continue
+            # If plate_detector found no box, skip the coordinate/drawing code.
+            # The OCR bypass (above) already added the plate to detected_plates
+            # when it succeeded — update_registration_log will be called at the
+            # end of this function regardless.  Attempting to use best_plate_box
+            # here when it is None causes the 'NoneType not subscriptable' crash.
+            if best_plate_box is None:
+                if not detected_plates:
+                    print(f"[DEBUG] No plate found inside {vehicle_type} crop. Skipping.")
+                continue  # skip coord conversion — always safe when box is None
 
             # Convert coords from expanded-crop space back to full frame space
             lpx1 = int(best_plate_box[0]) + vx1

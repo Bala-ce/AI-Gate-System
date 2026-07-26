@@ -221,8 +221,6 @@
                     </div>
                     <div
                         class="live-feed-container flex-1 glassmorphism rounded-lg border border-blue-500/30 overflow-hidden relative shadow-lg">
-                        <div class="absolute bottom-2 right-2 z-20 text-xs font-mono text-white bg-black/40 px-2 py-1 rounded-md backdrop-blur-sm shadow-md"
-                            id="camera-timestamp-entry"></div>
                         <img id="security-camera-feed-entry" class="w-full h-full object-cover hidden" />
                         <div
                             class="absolute inset-0 bg-blue-900/20 mix-blend-overlay z-10 pointer-events-none crosshair-overlay">
@@ -240,6 +238,9 @@
                                 Stopped</span>
                         </div>
                     </div>
+                    <!-- Timestamp bar — below feed, not overlaying video -->
+                    <div id="camera-timestamp-entry"
+                        class="text-center text-xs font-mono text-gray-400 tracking-wider py-0.5 select-none"></div>
                     <!-- Control Buttons -->
                     <div class="flex gap-2 justify-end shrink-0">
                         <button id="btn-start-capture-entry"
@@ -268,8 +269,6 @@
                     </div>
                     <div
                         class="live-feed-container flex-1 glassmorphism rounded-lg border border-blue-500/30 overflow-hidden relative shadow-lg">
-                        <div class="absolute bottom-2 right-2 z-20 text-xs font-mono text-white bg-black/40 px-2 py-1 rounded-md backdrop-blur-sm shadow-md"
-                            id="camera-timestamp"></div>
                         <img id="security-camera-feed" class="w-full h-full object-cover hidden" />
                         <div
                             class="absolute inset-0 bg-blue-900/20 mix-blend-overlay z-10 pointer-events-none crosshair-overlay">
@@ -287,6 +286,9 @@
                                 Stopped</span>
                         </div>
                     </div>
+                    <!-- Timestamp bar — below feed, not overlaying video -->
+                    <div id="camera-timestamp"
+                        class="text-center text-xs font-mono text-gray-400 tracking-wider py-0.5 select-none"></div>
                     <!-- Control Buttons -->
                     <div class="flex gap-2 justify-end shrink-0">
                         <button id="btn-start-capture"

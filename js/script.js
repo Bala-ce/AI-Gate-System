@@ -35,7 +35,8 @@ function updateDynamicTime() {
     const camMs  = String(now.getMilliseconds()).padStart(3, '0');
     const tsText = `${camYear}-${camMon}-${camDay} ${camHr}:${camMin}:${camSec}:${camMs}`;
     
-    document.getElementById('camera-timestamp').textContent = tsText;
+    const exitTs = document.getElementById('camera-timestamp');
+    if (exitTs) exitTs.textContent = tsText;
     const entryTs = document.getElementById('camera-timestamp-entry');
     if (entryTs) entryTs.textContent = tsText;
 }
@@ -475,8 +476,8 @@ if (sidebar && btnOpenSidebar && btnCloseSidebar) {
  */
 const themeToggleBtn = document.getElementById('theme-toggle-btn');
 if (themeToggleBtn) {
-    // Load saved theme preference
-    const savedTheme = localStorage.getItem('app-theme') || 'light';
+    // Load saved theme preference — default is dark mode on first visit
+    const savedTheme = localStorage.getItem('app-theme') || 'dark';
     if (savedTheme === 'dark') {
         document.documentElement.setAttribute('data-theme', 'dark');
         const icon = themeToggleBtn.querySelector('i');
