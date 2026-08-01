@@ -226,156 +226,54 @@ def preprocess_plate(plate_crop):
     if plate_crop is None or plate_crop.size == 0:
         return plate_crop
 
-    gray = cv2.cvtColor(plate_crop, cv2.COLOR_BGR2GRAY)
-    bfilter = cv2.bilateralFilter(gray, 11, 17, 17)
+    # PaddleOCR's deep learning model performs best on natural BGR images.
+    # Extreme binarization (adaptiveThreshold) or incorrect contour warping 
+    # often destroys the text and causes false negatives, especially on 
+    # multi-line plates or large bumper strips. 
+    # We return the crop directly for the OCR engine.
+    return plate_crop
 
-    edged = cv2.Canny(bfilter, 30, 200)
-    contours, _ = cv2.findContours(edged.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-    contours = sorted(contours, key=cv2.contourArea, reverse=True)[:10]
-
-    screenCnt = None
-    for c in contours:
-        peri = cv2.arcLength(c, True)
-        approx = cv2.approxPolyDP(c, 0.018 * peri, True)
-        if len(approx) == 4:
-            screenCnt = approx
-            break
-
-    if screenCnt is not None:
-        pts = screenCnt.reshape(4, 2)
-        rect = order_points(pts)
-        (tl, tr, br, bl) = rect
-        widthA = np.sqrt(((br[0] - bl[0]) ** 2) + ((br[1] - bl[1]) ** 2))
-        widthB = np.sqrt(((tr[0] - tl[0]) ** 2) + ((tr[1] - tl[1]) ** 2))
-        maxWidth = max(int(widthA), int(widthB))
-        heightA = np.sqrt(((tr[0] - br[0]) ** 2) + ((tr[1] - br[1]) ** 2))
-        heightB = np.sqrt(((tl[0] - bl[0]) ** 2) + ((tl[1] - bl[1]) ** 2))
-        maxHeight = max(int(heightA), int(heightB))
-
-        dst = np.array(
-            [
-                [0, 0],
-                [maxWidth - 1, 0],
-                [maxWidth - 1, maxHeight - 1],
-                [0, maxHeight - 1],
-            ],
-            dtype="float32",
-        )
-
-        M = cv2.getPerspectiveTransform(rect, dst)
-        warped = cv2.warpPerspective(gray, M, (maxWidth, maxHeight))
-    else:
-        warped = gray
-
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-    cl1 = clahe.apply(warped)
-
-    binary = cv2.adaptiveThreshold(
-        cl1, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2
-    )
-    return binary
 
 
 # ============================================================
-# --- CHARACTER CORRECTION MODULE ---
+# --- PARSE OCR MODULE ---
 # ============================================================
-
-
-def normalize_indian_plate(raw: str) -> str:
-    """
-    Applies position-aware character correction for common OCR confusions
-    in Indian vehicle registration number plates.
-
-    Indian plate structure (total length 9 or 10 chars):
-      Positions 0–1       : Letters  — state code      (e.g. TN, MH, KA)
-      Positions 2–3       : Digits   — district code   (e.g. 57, 12, 01)
-      Positions 4 .. n-5  : Letters  — series          (1 or 2 letters)
-      Positions n-4 .. n-1: Digits   — vehicle number  (always 4 digits)
-
-    Corrections applied (only when a character is the wrong type for its slot):
-      At a DIGIT  position: O→0  I→1  L→1  Z→2  S→5  G→6  B→8
-      At a LETTER position: 0→O  1→I  2→Z  5→S  6→G  8→B
-
-    Already-valid characters are NEVER modified.
-    Returns the original string unchanged if length is outside 9-10.
-
-    Examples:
-      TN3BAB1234  →  TN38AB1234   (B at digit pos-3 → 8)
-      TN38A81234  →  TN38AB1234   (8 at letter pos-5 → B)
-      MHIZDE4567  →  MH12DE4567   (I at digit pos-2 → 1, Z at digit pos-3 → 2)
-      IN57BR8817  →  IN57BR8817   (unchanged — all chars already valid for their slot)
-    """
-    n = len(raw)
-    if n < 9 or n > 10:
-        return raw  # Cannot determine plate structure — leave unchanged
-
-    # Last 4 positions are always digits; first 2 and middle section are letters;
-    # positions 2–3 are always digits.
-    digit_positions = {2, 3} | set(range(n - 4, n))
-    letter_positions = set(range(n)) - digit_positions
-
-    # Characters that look like letters but should be digits at digit positions
-    letter_to_digit = {"O": "0", "I": "1", "L": "1", "Z": "2", "S": "5", "G": "6", "B": "8"}
-    # Characters that look like digits but should be letters at letter positions
-    digit_to_letter = {"0": "O", "1": "I", "2": "Z", "5": "S", "6": "G", "8": "B"}
-
-    corrected = list(raw)
-    changed = False
-    for i, ch in enumerate(raw):
-        if i in digit_positions and ch in letter_to_digit:
-            corrected[i] = letter_to_digit[ch]
-            changed = True
-        elif i in letter_positions and ch in digit_to_letter:
-            corrected[i] = digit_to_letter[ch]
-            changed = True
-
-    result = "".join(corrected)
-    if changed:
-        print(f"[DEBUG] Plate correction: {raw!r} → {result!r}")
-    return result
 
 
 def parse_ocr_results(paddle_result):
     """
-    Parses PaddleOCR 3.x output (from .predict()) to extract plate text.
+    Parses PaddleOCR 3.x output to extract Indian plate text.
 
-    PaddleOCR 3.x predict() returns a list of OCRResult objects.
-    Each OCRResult has:
-      .rec_texts  -> list of recognized strings
-      .rec_scores -> list of confidence floats
-      .rec_boxes  -> list of bounding boxes [[x1,y1],[x2,y1],[x2,y2],[x1,y2]]
+    Supports both single-line plates (cars) and two-line plates (buses):
+      Row 1: State code + District  — e.g. "TN57"
+      Row 2: Series + Vehicle num   — e.g. "CA7383"
+
+    Detection strategies (tried in order):
+      1. Two-line pair match  — fastest, handles bus plates
+      2. Full concatenation   — handles single-line plates
+      3. Sliding-window scan  — handles plates mixed with body text
     """
     if not paddle_result:
         return ""
 
+    # Expanded blacklist — catches both clean and OCR-mangled brand names
     BLACKLIST = [
-        "ASHOK",
-        "LEYLAND",
-        "TATA",
-        "MAHINDRA",
-        "MARUTI",
-        "SUZUKI",
-        "HYUNDAI",
-        "TOYOTA",
-        "HONDA",
-        "EICHER",
-        "BHARATBENZ",
-        "ISUZU",
-        "VOLVO",
-        "JCB",
-        "FORCE",
-        "ASHOK LEYLAND",
+        "ASHOK", "LEYLAND", "ASHOKLEYLAND",
+        "SHOKLEYLAND", "HOKLEYLAND", "SHOKLEY",
+        "TATA", "MAHINDRA", "MARUTI", "SUZUKI", "HYUNDAI", "TOYOTA",
+        "HONDA", "EICHER", "BHARATBENZ", "ISUZU", "VOLVO", "JCB", "FORCE",
+        "COLLEGE", "GLOBALTVS", "GLOSALTV", "GLOBALTV",
     ]
 
     valid_boxes = []
 
-    for res in paddle_result:  # one OCRResult per image in the batch
+    for res in paddle_result:
         texts = res["rec_texts"]
         scores = res["rec_scores"]
         boxes = res["rec_boxes"]
 
         for text, conf, bbox in zip(texts, scores, boxes):
-            if conf > 0.2:
+            if conf > 0.15:
                 clean_text = re.sub(r"[^A-Z0-9]", "", text.upper())
 
                 if not clean_text or clean_text in ["IND", "INDIA", "IN"]:
@@ -385,33 +283,29 @@ def parse_ocr_results(paddle_result):
                     print(f"[DEBUG] Blacklisted brand detected: {clean_text}")
                     continue
 
-                # PaddleOCR 3.x returns flat [x1,y1,x2,y2]; older versions use [[x1,y1],[x2,y2],...]
                 try:
                     if hasattr(bbox[0], "__len__"):
-                        # Nested format: [[x1,y1],[x2,y1],[x2,y2],[x1,y2]]
-                        x_min = bbox[0][0]
-                        y_min = bbox[0][1]
-                        x_max = bbox[2][0]
-                        y_max = bbox[2][1]
+                        x_min = bbox[0][0]; y_min = bbox[0][1]
+                        x_max = bbox[2][0]; y_max = bbox[2][1]
                     else:
-                        # Flat format: [x1, y1, x2, y2]
                         x_min, y_min, x_max, y_max = bbox[0], bbox[1], bbox[2], bbox[3]
                 except Exception as e:
                     print(f"[DEBUG] bbox parse error: {e}, bbox={bbox}")
                     continue
 
-                valid_boxes.append(
-                    {
-                        "text": clean_text,
-                        "cy": (y_min + y_max) / 2,
-                        "cx": (x_min + x_max) / 2,
-                    }
-                )
+                valid_boxes.append({
+                    "text": clean_text,
+                    "cy": (y_min + y_max) / 2,
+                    "cx": (x_min + x_max) / 2,
+                    "h":  y_max - y_min,
+                })
 
     if not valid_boxes:
         return ""
 
-    # Group into lines (multi-line plates e.g. buses)
+    # Group text boxes into horizontal lines.
+    # Threshold is dynamic: use 60% of avg char height so upscaled plates
+    # with large pixel gaps between chars still cluster correctly.
     valid_boxes.sort(key=lambda b: b["cy"])
     lines = []
     for box in valid_boxes:
@@ -420,68 +314,195 @@ def parse_ocr_results(paddle_result):
         else:
             last_line = lines[-1]
             avg_cy = sum(b["cy"] for b in last_line) / len(last_line)
-            if abs(box["cy"] - avg_cy) < 15:
+            avg_h  = sum(b["h"]  for b in last_line) / len(last_line)
+            if abs(box["cy"] - avg_cy) < max(15, avg_h * 0.6):
                 last_line.append(box)
             else:
                 lines.append([box])
 
-    combined_text = ""
-    for line in lines:
-        line.sort(key=lambda b: b["cx"])
-        for box in line:
-            combined_text += box["text"]
+    # Build per-line text strings (left → right within each line)
+    line_texts = [
+        "".join(b["text"] for b in sorted(ln, key=lambda b: b["cx"]))
+        for ln in lines
+    ]
+    print(f"[DEBUG] OCR lines detected: {line_texts}")
 
-    print(f"[DEBUG] Concatenated Plate Candidate: {combined_text}")
+    # -------------------------------------------------------------------
+    # Indian number plate token specification (two formats supported):
+    #
+    # 1) Normal Series — State/RTO format
+    #    Token pattern: [ST] [RT] [SR] [NUM]
+    #    • [ST] Pos 1-2 : Exactly 2 letters [A-Z]{2}   — State code    e.g. KA, TN, MH
+    #    • [RT] Pos 3-4 : Exactly 2 digits  [0-9]{2}   — RTO district  e.g. 01, 57
+    #    • [SR] Pos 5-6 : 1–2 letters       [A-Z]{1,2} — Series marker e.g. MJ, A
+    #                     (0 letters only for brand-new RTO zones — very rare)
+    #    • [NUM] Pos 7-10: Exactly 4 digits [0-9]{4}   — Unique number e.g. 4321
+    #    Total length: 8 (no-series, rare) | 9 (1-letter) | 10 (2-letter, standard)
+    #    Single-line example:  KA01MJ4321
+    #    Two-line Line 1: [ST][RT]   e.g. KA01
+    #    Two-line Line 2: [SR][NUM]  e.g. MJ4321
+    #
+    # 2) Bharat (BH) Series format
+    #    Token pattern: [YR] BH [NUM] [SUF]
+    #    • [YR]  Pos 1-2 : Exactly 2 digits [0-9]{2}          — Year     e.g. 26
+    #    • [BH]  Pos 3-4 : Hardcoded string "BH"              — Marker
+    #    • [NUM] Pos 5-8 : Exactly 4 digits [0-9]{4}          — Number   e.g. 9012
+    #    • [SUF] Pos 9-10: Exactly 2 letters [A-HJ-NP-Z]{2}  — Series   e.g. AA
+    #                      (I and O excluded per HSRP rules)
+    #    Total length: exactly 10 characters
+    #    Single-line example:  26BH9012AA
+    #    Two-line Line 1: [YR][BH]       e.g. 26BH
+    #    Two-line Line 2: [NUM][SUF]     e.g. 9012AA
+    # -------------------------------------------------------------------
 
-    STRICT_PATTERN_1 = r"^[A-Z]{2}[0-9]{1,2}[A-Z]{0,3}[0-9]{1,4}$"
-    STRICT_PATTERN_2 = r"^[A-Z]{2}[0-9]{2}[A-Z]{2}[1-9]{1,4}$"
+    STRICT_STANDARD = r"^[A-Z]{2}[0-9]{2}[A-Z]{0,2}[0-9]{4}$"  # [ST][RT][SR 0-2][NUM]
+    STRICT_BH       = r"^[0-9]{2}BH[0-9]{4}[A-HJ-NP-Z]{2}$"   # [YR][BH][NUM][SUF no I/O]
 
     def _matches(s):
-        return re.match(STRICT_PATTERN_1, s) or re.match(STRICT_PATTERN_2, s)
+        return (bool(re.match(STRICT_STANDARD, s)) or
+                bool(re.match(STRICT_BH, s)))
 
-    # --- Fast path: full concatenation is already 9-10 chars ---
-    if 9 <= len(combined_text) <= 10:
-        # OCR → Character Correction → Regex Validation → Final Plate
-        corrected = normalize_indian_plate(combined_text)
-        if _matches(corrected):
-            print(f"[DEBUG] Accepted final plate: {corrected}")
-            return corrected
-        # Try reversed — handles mirrored webcam feeds
-        reversed_text = corrected[::-1]
-        if _matches(reversed_text):
-            print(
-                f"[DEBUG] Accepted reversed plate: {reversed_text} (was: {combined_text})"
-            )
-            return reversed_text
-        print(f"[DEBUG] Rejected plate '{combined_text}': Failed strict pattern match.")
+    # -------------------------------------------------------------------
+    # Position-aware OCR character correction.
+    #
+    # OCR confuses characters that look alike (O↔0, I↔1, S↔5, Z↔2, B↔8).
+    # Applying a global replace is WRONG — "I" in a series like "BI" is a
+    # real letter and must not become "1".
+    #
+    # Solution: apply correction only to the slot where that character type
+    # is EXPECTED — digits in digit positions, letters in letter positions.
+    #
+    # Standard plate:  [ST]  [RT]  [SR 0-2]  [NUM]
+    #                   ↑↑    ↑↑     ↑↑        ↑↑↑↑
+    #                 letter digit  letter     digit
+    #
+    # BH plate:        DD  BH  DDDD  LL
+    #                  ↑↑  --  ↑↑↑↑  ↑↑
+    #                digit fix  digit letter
+    # -------------------------------------------------------------------
+    _DIGIT_FIX  = str.maketrans("OISZB", "01528")   # letter→digit (digit slots)
+    _LETTER_FIX = str.maketrans("01528", "OISZB")   # digit→letter (letter slots)
+
+    def fix_plate_ocr(s):
+        """
+        Apply position-aware OCR correction based on the detected plate format.
+        Returns the corrected string (unchanged if format cannot be determined).
+        """
+        n = len(s)
+
+        # BH format: exactly 10 chars, starts with 2 digits, chars 2-3 are "BH"
+        if n == 10 and s[0].isdigit() and s[1].isdigit() and s[2:4] in ("BH", "8H", "B4"):
+            year   = s[0:2].translate(_DIGIT_FIX)          # DD
+            bh     = "BH"                                   # always hardcoded
+            num    = s[4:8].translate(_DIGIT_FIX)           # DDDD
+            series = s[8:10].translate(_LETTER_FIX)         # LL
+            return year + bh + num + series
+
+        # Standard format: 8–10 chars
+        #   8 = [ST:2][RT:2][NUM:4]         — no series (rare, brand-new RTO)
+        #   9 = [ST:2][RT:2][SR:1][NUM:4]   — 1-letter series
+        #  10 = [ST:2][RT:2][SR:2][NUM:4]   — 2-letter series (most common)
+        if 8 <= n <= 10:
+            series_len = n - 8   # 0, 1, or 2
+            state  = s[0:2].translate(_LETTER_FIX)              # [ST] 2 letters
+            dist   = s[2:4].translate(_DIGIT_FIX)               # [RT] 2 digits
+            series = s[4:4 + series_len].translate(_LETTER_FIX) # [SR] 0–2 letters
+            number = s[4 + series_len:].translate(_DIGIT_FIX)   # [NUM] 4 digits
+            return state + dist + series + number
+
+        return s  # cannot determine format — return as-is
+
+    # -------------------------------------------------------------------
+    # Strategy 1: Two-line plate reconstruction (primary for bus plates)
+    #
+    # Standard (Normal Series) two-line split — per token spec:
+    #   Line 1: [ST][RT]     Regex: ^[A-Z]{2}[0-9]{2}$           e.g. "KA01"
+    #   Line 2: [SR][NUM]    Regex: ^[A-Z]{1,2}[0-9]{4}$         e.g. "MJ4321"
+    #   Line 2 (no-series):  Regex: ^[0-9]{4}$                    e.g. "4321" (rare)
+    #
+    # BH Series two-line split — per token spec:
+    #   Line 1: [YR][BH]     Regex: ^[0-9]{2}BH$                  e.g. "26BH"
+    #   Line 2: [NUM][SUF]   Regex: ^[0-9]{4}[A-HJ-NP-Z]{2}$     e.g. "9012AA"
+    # -------------------------------------------------------------------
+    LINE1_STD          = re.compile(r"^[A-Z]{2}[0-9]{2}$")        # [ST][RT]
+    LINE2_STD          = re.compile(r"^[A-Z]{1,2}[0-9]{4}$")      # [SR][NUM] standard
+    LINE2_STD_NOSERIES = re.compile(r"^[0-9]{4}$")                 # [NUM] only (rare)
+    LINE1_BH           = re.compile(r"^[0-9]{2}BH$")               # [YR][BH]
+    LINE2_BH           = re.compile(r"^[0-9]{4}[A-HJ-NP-Z]{2}$")  # [NUM][SUF]
+
+    for i, t1 in enumerate(line_texts):
+        for j, t2 in enumerate(line_texts):
+            if i == j:
+                continue
+
+            # --- Standard format 2-line check ([SR] present: 1–2 letters) ---
+            if LINE1_STD.match(t1) and LINE2_STD.match(t2):
+                candidate = fix_plate_ocr(t1 + t2)
+                if _matches(candidate):
+                    print(f"[DEBUG] 2-line standard plate: {candidate} (row1={t1!r} row2={t2!r})")
+                    return candidate
+
+            # --- Standard format 2-line check ([SR] absent: rare no-series RTO) ---
+            if LINE1_STD.match(t1) and LINE2_STD_NOSERIES.match(t2):
+                candidate = fix_plate_ocr(t1 + t2)
+                if _matches(candidate):
+                    print(f"[DEBUG] 2-line no-series plate: {candidate} (row1={t1!r} row2={t2!r})")
+                    return candidate
+
+            # --- BH Series 2-line check ([YR][BH] + [NUM][SUF]) ---
+            if LINE1_BH.match(t1) and LINE2_BH.match(t2):
+                candidate = fix_plate_ocr(t1 + t2)
+                if _matches(candidate):
+                    print(f"[DEBUG] 2-line BH plate: {candidate} (row1={t1!r} row2={t2!r})")
+                    return candidate
+
+    # -------------------------------------------------------------------
+    # Strategy 2: Full concatenation — for single-line plates
+    #
+    # Valid lengths per spec:
+    #   Standard: 8 (no-series, rare) | 9 (1-letter series) | 10 (2-letter series)
+    #   BH series: exactly 10
+    #   → Accept range: 8–10
+    # -------------------------------------------------------------------
+    combined_text = "".join(line_texts)
+    print(f"[DEBUG] Concatenated Plate Candidate: {combined_text}")
+
+    if 8 <= len(combined_text) <= 10:
+        fixed = fix_plate_ocr(combined_text)
+        if _matches(fixed):
+            print(f"[DEBUG] Accepted plate: {fixed}")
+            return fixed
+        # Try reversed — handles mirrored feeds
+        fixed_rev = fix_plate_ocr(combined_text[::-1])
+        if _matches(fixed_rev):
+            print(f"[DEBUG] Accepted reversed plate: {fixed_rev}")
+            return fixed_rev
+        print(f"[DEBUG] Rejected plate '{combined_text}': failed pattern match.")
         return ""
 
-    # --- Sliding-window: scan for a 9-10 char plate substring inside a longer string ---
-    # This handles buses where all body text is concatenated with the plate number.
-    # Character correction is applied to every candidate window before validation.
+    # -------------------------------------------------------------------
+    # Strategy 3: Sliding-window scan inside a long concatenated string
+    # Happens when bus body text leaks into OCR output along with the plate.
+    #
+    # Window sizes match all valid plate lengths:
+    #   10 — 2-letter series standard / BH series (most common)
+    #    9 — 1-letter series standard
+    #    8 — no-series standard (rare)
+    # -------------------------------------------------------------------
     if len(combined_text) > 10:
-        print(
-            f"[DEBUG] String too long ({len(combined_text)}). Scanning for plate substring..."
-        )
-        # Try forward then reversed string
-        for candidate in (combined_text, combined_text[::-1]):
-            for win in (10, 9):
-                for i in range(len(candidate) - win + 1):
-                    substr = normalize_indian_plate(candidate[i : i + win])
-                    if _matches(substr):
-                        print(f"[DEBUG] Found plate substring: {substr}")
-                        return substr
+        print(f"[DEBUG] String too long ({len(combined_text)}). Scanning for plate substring...")
+        for candidate_str in (combined_text, combined_text[::-1]):
+            for win in (10, 9, 8):
+                for k in range(len(candidate_str) - win + 1):
+                    substr = candidate_str[k: k + win]
+                    fixed = fix_plate_ocr(substr)
+                    if _matches(fixed):
+                        print(f"[DEBUG] Found plate substring: {fixed}")
+                        return fixed
         print(f"[DEBUG] No plate pattern found in '{combined_text}'")
         return ""
 
-    # Too short — try correction in case a digit→letter fix changes nothing structurally
-    corrected = normalize_indian_plate(combined_text)
-    if _matches(corrected):
-        return corrected
-
-    print(
-        f"[DEBUG] Rejected plate '{combined_text}': length {len(combined_text)} not in 9-10."
-    )
+    print(f"[DEBUG] Rejected plate '{combined_text}': length {len(combined_text)} not in 8-10.")
     return ""
 
 
@@ -494,7 +515,7 @@ def process_vehicle_detection(frame, gate_name: str):
     global entry_ann_lock, exit_ann_lock
     current_annotations = []
 
-    proc_frame = cv2.resize(frame, (640, 480))
+    proc_frame = cv2.resize(frame, (640, 640))
 
     # Run YOLO on GPU (auto-detected device) for Car(2), Bus(5), Truck(7)
     results = model.predict(
@@ -542,12 +563,15 @@ def process_vehicle_detection(frame, gate_name: str):
             # sits at bumper level and is often clipped by YOLO's bounding box.
             pad_veh_w = max(1, int((x2 - x1) * 0.15))
             pad_veh_h_top = max(1, int((y2 - y1) * 0.15))
-            # Bus/Truck: extend bottom by 40% to capture bumper-level plates
-            pad_veh_h_bot = max(1, int((y2 - y1) * (0.40 if vehicle_type in ("Bus", "Truck") else 0.15)))
+            # Bus/Truck: extend bottom by 60% to capture bumper-level plates
+            pad_veh_h_bot = max(1, int((y2 - y1) * (0.60 if vehicle_type in ("Bus", "Truck") else 0.15)))
             vx1 = max(0, x1 - pad_veh_w)
             vy1 = max(0, y1 - pad_veh_h_top)
             vx2 = min(proc_frame.shape[1], x2 + pad_veh_w)
             vy2 = min(proc_frame.shape[0], y2 + pad_veh_h_bot)
+            # For Bus/Truck extend vy2 to absolute frame bottom to never miss bumper plates
+            if vehicle_type in ("Bus", "Truck"):
+                vy2 = proc_frame.shape[0]
             veh_crop = proc_frame[vy1:vy2, vx1:vx2]
             if veh_crop.size == 0:
                 continue
@@ -600,7 +624,7 @@ def process_vehicle_detection(frame, gate_name: str):
                 bott_crop = veh_crop[bott_start:, :]
                 if bott_crop.size > 0:
                     bottom_results = plate_detector.predict(
-                        bott_crop, device=YOLO_DEVICE, conf=0.15, verbose=False
+                        bott_crop, device=YOLO_DEVICE, conf=0.10, verbose=False
                     )
                     bott_area = max(1, bott_crop.shape[1] * bott_crop.shape[0])
                     for pr in bottom_results:
@@ -635,43 +659,56 @@ def process_vehicle_detection(frame, gate_name: str):
             # structurally impossible.
             # ---------------------------------------------------------------
             if best_plate_box is None and vehicle_type in ("Bus", "Truck"):
-                print("[DEBUG] Bus/Truck OCR bypass: scanning bumper strips directly...")
+                # OCR BYPASS — bottom-up center scan (max 3 strips).
+                # WHY BOTTOM-UP: Plate is always lowest text on the bus.
+                #   Brand logos (ASHOK LEYLAND, GLOBAL TVS) sit ABOVE the plate.
+                #   Scanning bottom-up finds the plate first, stops before logos.
+                # WHY CENTER 70% WIDTH: Logos span full width; plates are centered.
+                # WHY 200px: 2-line plate chars need bigger pixels to be OCR-readable.
+                # WHY MAX 3 STRIPS: More than 3 risks including brand-text rows.
+                #   Each OCR call is ~150-300ms on CPU, so 3 max = ~0.5s worst case.
+                print("[DEBUG] Bus/Truck OCR bypass: bottom-up center scan...")
                 crop_h_full, crop_w_full = veh_crop.shape[:2]
-                # Divide the bottom 40% into 3 overlapping strips and try each
-                zone_top = int(crop_h_full * 0.60)   # start of bottom 40%
-                strip_h  = max(1, (crop_h_full - zone_top) // 3)
-                strips = [
-                    veh_crop[zone_top : zone_top + strip_h * 2, :],  # top-of-zone
-                    veh_crop[zone_top + strip_h : , :],              # mid-to-bottom
-                    veh_crop[zone_top : , :],                        # full bottom zone
-                ]
-                for idx, strip in enumerate(strips):
-                    if strip.size == 0:
+
+                # 3 full-width strips, bottom-up order:
+                #   Strip 0: bottom 20% — catches 2-line plates at bumper bottom
+                #   Strip 1: bottom 30% — intermediate catch
+                #   Strip 2: bottom 40% — PROVEN to find single-line bus plates
+                #
+                # WHY FULL WIDTH (no center constraint):
+                #   The old center-70% restriction accidentally excluded some plates.
+                #   Brand text (ASHOK LEYLAND) is already handled by the blacklist
+                #   inside parse_ocr_results — no need to cut it out spatially.
+                #
+                # WHY STOP EARLY: As soon as a plate is found, we break.
+                #   Best case = 1 OCR call (~200ms). Worst = 3 (~600ms).
+                for idx, frac in enumerate([0.80, 0.70, 0.60]):
+                    ys    = int(crop_h_full * frac)
+                    strip = veh_crop[ys:, :]  # full width
+
+                    if strip.size == 0 or strip.shape[0] < 5:
                         continue
-                    sw, sh = strip.shape[1], strip.shape[0]
-                    # Upscale so OCR has enough pixels (target height ≥ 60 px)
-                    if sh < 60:
-                        up = 60 / max(1, sh)
+
+                    sh, sw = strip.shape[:2]
+                    if sh < 200:
+                        scale = 200 / max(1, sh)
                         strip = cv2.resize(
                             strip,
-                            (int(sw * up), 60),
-                            interpolation=cv2.INTER_LINEAR,
+                            (int(sw * scale), 200),
+                            interpolation=cv2.INTER_CUBIC,
                         )
-                    clean_strip = preprocess_plate(strip)
-                    if len(clean_strip.shape) == 2:
-                        clean_strip_bgr = cv2.cvtColor(clean_strip, cv2.COLOR_GRAY2BGR)
-                    else:
-                        clean_strip_bgr = clean_strip
+
                     with ocr_lock:
-                        paddle_bypass = ocr_engine.predict(clean_strip_bgr)
+                        paddle_bypass = ocr_engine.predict(strip)
                     bypass_text = parse_ocr_results(paddle_bypass)
+
                     if len(bypass_text) > 3:
                         detected_plates.append((bypass_text, vehicle_type))
                         print(
-                            f"[DETECTION] OCR-bypass strip-{idx}: {bypass_text}"
+                            f"[DETECTION] OCR-bypass strip-{idx} (from {frac:.0%}): {bypass_text}"
                             f" | Vehicle: {vehicle_type} | Gate: {gate_name}"
                         )
-                        break  # found — no need to scan remaining strips
+                        break
 
             # If plate_detector found no box, skip the coordinate/drawing code.
             # The OCR bypass (above) already added the plate to detected_plates
@@ -689,7 +726,7 @@ def process_vehicle_detection(frame, gate_name: str):
             lpx2 = int(best_plate_box[2]) + vx1
             lpy2 = int(best_plate_box[3]) + vy1
 
-            # Add 5% padding on all sides for better OCR accuracy
+            # --- Plate crop padding (all sides, uniform 5%) ---
             pad_w = max(1, int((lpx2 - lpx1) * 0.05))
             pad_h = max(1, int((lpy2 - lpy1) * 0.05))
             px1 = max(0, lpx1 - pad_w)
@@ -697,24 +734,54 @@ def process_vehicle_detection(frame, gate_name: str):
             px2 = min(proc_frame.shape[1], lpx2 + pad_w)
             py2 = min(proc_frame.shape[0], lpy2 + pad_h)
 
-            # Fix 2: upscale tiny crops instead of discarding them.
-            # Logs showed "Plate crop too small (91x19), skipping" — valid plates
-            # were being thrown away.  Upscale to at least 200×60 so PaddleOCR
-            # has enough pixels to read the characters accurately.
+            # --- 2-line plate bottom-clip fix ---
+            # When the plate aspect ratio (W÷H) is < 2.5 the plate is
+            # square-ish, which is the signature of a two-line plate
+            # (e.g., buses, trucks).  YOLO's bounding box often clips the
+            # bottom alphanumeric row.  Extend py2 by an extra 15% of the
+            # plate height to guarantee the lower text line is included.
+            plate_w = lpx2 - lpx1
+            plate_h = max(1, lpy2 - lpy1)
+            plate_aspect = plate_w / plate_h
+            if plate_aspect < 2.5:
+                extra_bot = max(1, int(plate_h * 0.15))
+                py2 = min(proc_frame.shape[0], py2 + extra_bot)
+                print(
+                    f"[DEBUG] 2-line plate detected (aspect={plate_aspect:.2f}):"
+                    f" extending bottom by {extra_bot}px to avoid line-clip."
+                )
+
             plate_crop = proc_frame[py1:py2, px1:px2]
             if plate_crop.size == 0:
                 continue
             crop_pw, crop_ph = plate_crop.shape[1], plate_crop.shape[0]
-            if crop_pw < 60 or crop_ph < 20:
+
+            # --- Smart upscaling ---
+            # 2-line plates (aspect < 2.5): ALWAYS upscale 3× with INTER_CUBIC.
+            #   Both rows are small and dense; 3× gives PaddleOCR enough pixels
+            #   to distinguish stacked characters reliably.
+            # Single-line plates (aspect ≥ 2.5): upscale only when crop is
+            #   below the minimum readable threshold (was the previous behaviour).
+            if plate_aspect < 2.5:
+                plate_crop = cv2.resize(
+                    plate_crop,
+                    (crop_pw * 3, crop_ph * 3),
+                    interpolation=cv2.INTER_CUBIC,
+                )
+                print(
+                    f"[DEBUG] 2-line plate crop ({crop_pw}x{crop_ph}) upscaled 3×"
+                    f" → ({crop_pw * 3}x{crop_ph * 3}) for OCR."
+                )
+            elif crop_pw < 60 or crop_ph < 20:
+                # Single-line plate too small — upscale to minimum readable size
                 print(
                     f"[DEBUG] Plate crop small ({crop_pw}x{crop_ph}), upscaling for OCR."
                 )
-                # Compute scale so the shorter side meets the minimum threshold
                 scale = max(200 / max(1, crop_pw), 60 / max(1, crop_ph))
                 plate_crop = cv2.resize(
                     plate_crop,
                     (int(crop_pw * scale), int(crop_ph * scale)),
-                    interpolation=cv2.INTER_LINEAR,
+                    interpolation=cv2.INTER_CUBIC,
                 )
 
             # (plate_crop already obtained above — with upscaling if needed)
