@@ -108,7 +108,9 @@ def _load_yolo_with_trt(pt_path: str, device: str) -> "YOLO":
     # --- No engine yet — export from .pt (one-time, takes a few minutes) ---
     if device.startswith("cuda") and torch.cuda.is_available():
         try:
-            print(f"[STARTUP] Exporting {pt_path} → TensorRT engine (one-time, please wait)...")
+            print(
+                f"[STARTUP] Exporting {pt_path} → TensorRT engine (one-time, please wait)..."
+            )
             base_model = YOLO(pt_path)
             # half=True  → FP16 (2× less VRAM, faster on Turing/Ampere/Ada GPUs)
             # dynamic=False → fixed input shape (faster engine; input is always 640×640)
@@ -173,7 +175,7 @@ raw_entry_frame = None
 raw_exit_frame = None
 
 # AI worker throttle: minimum seconds between consecutive detections per gate
-AI_INTERVAL_SECONDS = 2.0
+AI_INTERVAL_SECONDS = 0.5
 
 
 class ConnectionManager:
@@ -227,12 +229,11 @@ def preprocess_plate(plate_crop):
         return plate_crop
 
     # PaddleOCR's deep learning model performs best on natural BGR images.
-    # Extreme binarization (adaptiveThreshold) or incorrect contour warping 
-    # often destroys the text and causes false negatives, especially on 
-    # multi-line plates or large bumper strips. 
+    # Extreme binarization (adaptiveThreshold) or incorrect contour warping
+    # often destroys the text and causes false negatives, especially on
+    # multi-line plates or large bumper strips.
     # We return the crop directly for the OCR engine.
     return plate_crop
-
 
 
 # ============================================================
@@ -258,11 +259,29 @@ def parse_ocr_results(paddle_result):
 
     # Expanded blacklist — catches both clean and OCR-mangled brand names
     BLACKLIST = [
-        "ASHOK", "LEYLAND", "ASHOKLEYLAND",
-        "SHOKLEYLAND", "HOKLEYLAND", "SHOKLEY",
-        "TATA", "MAHINDRA", "MARUTI", "SUZUKI", "HYUNDAI", "TOYOTA",
-        "HONDA", "EICHER", "BHARATBENZ", "ISUZU", "VOLVO", "JCB", "FORCE",
-        "COLLEGE", "GLOBALTVS", "GLOSALTV", "GLOBALTV",
+        "ASHOK",
+        "LEYLAND",
+        "ASHOKLEYLAND",
+        "SHOKLEYLAND",
+        "HOKLEYLAND",
+        "SHOKLEY",
+        "TATA",
+        "MAHINDRA",
+        "MARUTI",
+        "SUZUKI",
+        "HYUNDAI",
+        "TOYOTA",
+        "HONDA",
+        "EICHER",
+        "BHARATBENZ",
+        "ISUZU",
+        "VOLVO",
+        "JCB",
+        "FORCE",
+        "COLLEGE",
+        "GLOBALTVS",
+        "GLOSALTV",
+        "GLOBALTV",
     ]
 
     valid_boxes = []
@@ -285,20 +304,24 @@ def parse_ocr_results(paddle_result):
 
                 try:
                     if hasattr(bbox[0], "__len__"):
-                        x_min = bbox[0][0]; y_min = bbox[0][1]
-                        x_max = bbox[2][0]; y_max = bbox[2][1]
+                        x_min = bbox[0][0]
+                        y_min = bbox[0][1]
+                        x_max = bbox[2][0]
+                        y_max = bbox[2][1]
                     else:
                         x_min, y_min, x_max, y_max = bbox[0], bbox[1], bbox[2], bbox[3]
                 except Exception as e:
                     print(f"[DEBUG] bbox parse error: {e}, bbox={bbox}")
                     continue
 
-                valid_boxes.append({
-                    "text": clean_text,
-                    "cy": (y_min + y_max) / 2,
-                    "cx": (x_min + x_max) / 2,
-                    "h":  y_max - y_min,
-                })
+                valid_boxes.append(
+                    {
+                        "text": clean_text,
+                        "cy": (y_min + y_max) / 2,
+                        "cx": (x_min + x_max) / 2,
+                        "h": y_max - y_min,
+                    }
+                )
 
     if not valid_boxes:
         return ""
@@ -314,7 +337,7 @@ def parse_ocr_results(paddle_result):
         else:
             last_line = lines[-1]
             avg_cy = sum(b["cy"] for b in last_line) / len(last_line)
-            avg_h  = sum(b["h"]  for b in last_line) / len(last_line)
+            avg_h = sum(b["h"] for b in last_line) / len(last_line)
             if abs(box["cy"] - avg_cy) < max(15, avg_h * 0.6):
                 last_line.append(box)
             else:
@@ -322,8 +345,7 @@ def parse_ocr_results(paddle_result):
 
     # Build per-line text strings (left → right within each line)
     line_texts = [
-        "".join(b["text"] for b in sorted(ln, key=lambda b: b["cx"]))
-        for ln in lines
+        "".join(b["text"] for b in sorted(ln, key=lambda b: b["cx"])) for ln in lines
     ]
     print(f"[DEBUG] OCR lines detected: {line_texts}")
 
@@ -355,12 +377,11 @@ def parse_ocr_results(paddle_result):
     #    Two-line Line 2: [NUM][SUF]     e.g. 9012AA
     # -------------------------------------------------------------------
 
-    STRICT_STANDARD = r"^[A-Z]{2}[0-9]{2}[A-Z]{0,2}[0-9]{4}$"  # [ST][RT][SR 0-2][NUM]
-    STRICT_BH       = r"^[0-9]{2}BH[0-9]{4}[A-HJ-NP-Z]{2}$"   # [YR][BH][NUM][SUF no I/O]
+    STRICT_STANDARD = r"^[A-Z]{2}[0-9]{2}[A-Z]{1,2}[0-9]{4}$"  # [ST][RT][SR 1-2][NUM] — min 1 series letter required (avoids garbled OCR 8-char false positives)
+    STRICT_BH = r"^[0-9]{2}BH[0-9]{4}[A-HJ-NP-Z]{2}$"  # [YR][BH][NUM][SUF no I/O]
 
     def _matches(s):
-        return (bool(re.match(STRICT_STANDARD, s)) or
-                bool(re.match(STRICT_BH, s)))
+        return bool(re.match(STRICT_STANDARD, s)) or bool(re.match(STRICT_BH, s))
 
     # -------------------------------------------------------------------
     # Position-aware OCR character correction.
@@ -380,8 +401,8 @@ def parse_ocr_results(paddle_result):
     #                  ↑↑  --  ↑↑↑↑  ↑↑
     #                digit fix  digit letter
     # -------------------------------------------------------------------
-    _DIGIT_FIX  = str.maketrans("OISZB", "01528")   # letter→digit (digit slots)
-    _LETTER_FIX = str.maketrans("01528", "OISZB")   # digit→letter (letter slots)
+    _DIGIT_FIX = str.maketrans("OISZB", "01528")  # letter→digit (digit slots)
+    _LETTER_FIX = str.maketrans("01528", "OISZB")  # digit→letter (letter slots)
 
     def fix_plate_ocr(s):
         """
@@ -391,23 +412,28 @@ def parse_ocr_results(paddle_result):
         n = len(s)
 
         # BH format: exactly 10 chars, starts with 2 digits, chars 2-3 are "BH"
-        if n == 10 and s[0].isdigit() and s[1].isdigit() and s[2:4] in ("BH", "8H", "B4"):
-            year   = s[0:2].translate(_DIGIT_FIX)          # DD
-            bh     = "BH"                                   # always hardcoded
-            num    = s[4:8].translate(_DIGIT_FIX)           # DDDD
-            series = s[8:10].translate(_LETTER_FIX)         # LL
+        if (
+            n == 10
+            and s[0].isdigit()
+            and s[1].isdigit()
+            and s[2:4] in ("BH", "8H", "B4")
+        ):
+            year = s[0:2].translate(_DIGIT_FIX)  # DD
+            bh = "BH"  # always hardcoded
+            num = s[4:8].translate(_DIGIT_FIX)  # DDDD
+            series = s[8:10].translate(_LETTER_FIX)  # LL
             return year + bh + num + series
 
-        # Standard format: 8–10 chars
-        #   8 = [ST:2][RT:2][NUM:4]         — no series (rare, brand-new RTO)
+        # Standard format: 9–10 chars (0-series 8-char format removed — too rare
+        # and causes garbled OCR false positives, e.g. LL068G41 being accepted).
         #   9 = [ST:2][RT:2][SR:1][NUM:4]   — 1-letter series
         #  10 = [ST:2][RT:2][SR:2][NUM:4]   — 2-letter series (most common)
-        if 8 <= n <= 10:
-            series_len = n - 8   # 0, 1, or 2
-            state  = s[0:2].translate(_LETTER_FIX)              # [ST] 2 letters
-            dist   = s[2:4].translate(_DIGIT_FIX)               # [RT] 2 digits
-            series = s[4:4 + series_len].translate(_LETTER_FIX) # [SR] 0–2 letters
-            number = s[4 + series_len:].translate(_DIGIT_FIX)   # [NUM] 4 digits
+        if 9 <= n <= 10:
+            series_len = n - 8  # 0, 1, or 2
+            state = s[0:2].translate(_LETTER_FIX)  # [ST] 2 letters
+            dist = s[2:4].translate(_DIGIT_FIX)  # [RT] 2 digits
+            series = s[4 : 4 + series_len].translate(_LETTER_FIX)  # [SR] 0–2 letters
+            number = s[4 + series_len :].translate(_DIGIT_FIX)  # [NUM] 4 digits
             return state + dist + series + number
 
         return s  # cannot determine format — return as-is
@@ -424,11 +450,11 @@ def parse_ocr_results(paddle_result):
     #   Line 1: [YR][BH]     Regex: ^[0-9]{2}BH$                  e.g. "26BH"
     #   Line 2: [NUM][SUF]   Regex: ^[0-9]{4}[A-HJ-NP-Z]{2}$     e.g. "9012AA"
     # -------------------------------------------------------------------
-    LINE1_STD          = re.compile(r"^[A-Z]{2}[0-9]{2}$")        # [ST][RT]
-    LINE2_STD          = re.compile(r"^[A-Z]{1,2}[0-9]{4}$")      # [SR][NUM] standard
-    LINE2_STD_NOSERIES = re.compile(r"^[0-9]{4}$")                 # [NUM] only (rare)
-    LINE1_BH           = re.compile(r"^[0-9]{2}BH$")               # [YR][BH]
-    LINE2_BH           = re.compile(r"^[0-9]{4}[A-HJ-NP-Z]{2}$")  # [NUM][SUF]
+    LINE1_STD = re.compile(r"^[A-Z]{2}[0-9]{2}$")  # [ST][RT]
+    LINE2_STD = re.compile(r"^[A-Z]{1,2}[0-9]{4}$")  # [SR][NUM] standard
+    LINE2_STD_NOSERIES = re.compile(r"^[0-9]{4}$")  # [NUM] only (rare)
+    LINE1_BH = re.compile(r"^[0-9]{2}BH$")  # [YR][BH]
+    LINE2_BH = re.compile(r"^[0-9]{4}[A-HJ-NP-Z]{2}$")  # [NUM][SUF]
 
     for i, t1 in enumerate(line_texts):
         for j, t2 in enumerate(line_texts):
@@ -439,35 +465,41 @@ def parse_ocr_results(paddle_result):
             if LINE1_STD.match(t1) and LINE2_STD.match(t2):
                 candidate = fix_plate_ocr(t1 + t2)
                 if _matches(candidate):
-                    print(f"[DEBUG] 2-line standard plate: {candidate} (row1={t1!r} row2={t2!r})")
+                    print(
+                        f"[DEBUG] 2-line standard plate: {candidate} (row1={t1!r} row2={t2!r})"
+                    )
                     return candidate
 
             # --- Standard format 2-line check ([SR] absent: rare no-series RTO) ---
             if LINE1_STD.match(t1) and LINE2_STD_NOSERIES.match(t2):
                 candidate = fix_plate_ocr(t1 + t2)
                 if _matches(candidate):
-                    print(f"[DEBUG] 2-line no-series plate: {candidate} (row1={t1!r} row2={t2!r})")
+                    print(
+                        f"[DEBUG] 2-line no-series plate: {candidate} (row1={t1!r} row2={t2!r})"
+                    )
                     return candidate
 
             # --- BH Series 2-line check ([YR][BH] + [NUM][SUF]) ---
             if LINE1_BH.match(t1) and LINE2_BH.match(t2):
                 candidate = fix_plate_ocr(t1 + t2)
                 if _matches(candidate):
-                    print(f"[DEBUG] 2-line BH plate: {candidate} (row1={t1!r} row2={t2!r})")
+                    print(
+                        f"[DEBUG] 2-line BH plate: {candidate} (row1={t1!r} row2={t2!r})"
+                    )
                     return candidate
 
     # -------------------------------------------------------------------
     # Strategy 2: Full concatenation — for single-line plates
     #
     # Valid lengths per spec:
-    #   Standard: 8 (no-series, rare) | 9 (1-letter series) | 10 (2-letter series)
+    #   Standard: 9 (1-letter series) | 10 (2-letter series, most common)
     #   BH series: exactly 10
-    #   → Accept range: 8–10
+    #   → Accept range: 9–10
     # -------------------------------------------------------------------
     combined_text = "".join(line_texts)
     print(f"[DEBUG] Concatenated Plate Candidate: {combined_text}")
 
-    if 8 <= len(combined_text) <= 10:
+    if 9 <= len(combined_text) <= 10:
         fixed = fix_plate_ocr(combined_text)
         if _matches(fixed):
             print(f"[DEBUG] Accepted plate: {fixed}")
@@ -487,14 +519,15 @@ def parse_ocr_results(paddle_result):
     # Window sizes match all valid plate lengths:
     #   10 — 2-letter series standard / BH series (most common)
     #    9 — 1-letter series standard
-    #    8 — no-series standard (rare)
     # -------------------------------------------------------------------
     if len(combined_text) > 10:
-        print(f"[DEBUG] String too long ({len(combined_text)}). Scanning for plate substring...")
+        print(
+            f"[DEBUG] String too long ({len(combined_text)}). Scanning for plate substring..."
+        )
         for candidate_str in (combined_text, combined_text[::-1]):
-            for win in (10, 9, 8):
+            for win in (10, 9):
                 for k in range(len(candidate_str) - win + 1):
-                    substr = candidate_str[k: k + win]
+                    substr = candidate_str[k : k + win]
                     fixed = fix_plate_ocr(substr)
                     if _matches(fixed):
                         print(f"[DEBUG] Found plate substring: {fixed}")
@@ -502,7 +535,9 @@ def parse_ocr_results(paddle_result):
         print(f"[DEBUG] No plate pattern found in '{combined_text}'")
         return ""
 
-    print(f"[DEBUG] Rejected plate '{combined_text}': length {len(combined_text)} not in 8-10.")
+    print(
+        f"[DEBUG] Rejected plate '{combined_text}': length {len(combined_text)} not in 9-10."
+    )
     return ""
 
 
@@ -564,7 +599,9 @@ def process_vehicle_detection(frame, gate_name: str):
             pad_veh_w = max(1, int((x2 - x1) * 0.15))
             pad_veh_h_top = max(1, int((y2 - y1) * 0.15))
             # Bus/Truck: extend bottom by 60% to capture bumper-level plates
-            pad_veh_h_bot = max(1, int((y2 - y1) * (0.60 if vehicle_type in ("Bus", "Truck") else 0.15)))
+            pad_veh_h_bot = max(
+                1, int((y2 - y1) * (0.60 if vehicle_type in ("Bus", "Truck") else 0.15))
+            )
             vx1 = max(0, x1 - pad_veh_w)
             vy1 = max(0, y1 - pad_veh_h_top)
             vx2 = min(proc_frame.shape[1], x2 + pad_veh_w)
@@ -603,10 +640,14 @@ def process_vehicle_detection(frame, gate_name: str):
                     aspect = bw / bh
                     # Fix: lowered minimum 1.5 → 1.0 to accept square two-row bus plates
                     if aspect < 1.0 or aspect > 7.0:
-                        print(f"[DEBUG] Plate candidate rejected (aspect {aspect:.2f}): not a number plate shape.")
+                        print(
+                            f"[DEBUG] Plate candidate rejected (aspect {aspect:.2f}): not a number plate shape."
+                        )
                         continue
                     if (bw * bh) > 0.20 * crop_area:
-                        print(f"[DEBUG] Plate candidate rejected (too large: {bw:.0f}x{bh:.0f} in {crop_w}x{crop_h} crop).")
+                        print(
+                            f"[DEBUG] Plate candidate rejected (too large: {bw:.0f}x{bh:.0f} in {crop_w}x{crop_h} crop)."
+                        )
                         continue
                     if conf > best_plate_conf:
                         best_plate_conf = conf
@@ -619,7 +660,9 @@ def process_vehicle_detection(frame, gate_name: str):
             # on just the bottom 40% so we can catch these without lowering the
             # global threshold and getting flooded with false positives.
             if best_plate_box is None and vehicle_type in ("Bus", "Truck"):
-                print("[DEBUG] Bus/Truck: retrying plate detection on bottom-40% strip (conf=0.15)...")
+                print(
+                    "[DEBUG] Bus/Truck: retrying plate detection on bottom-40% strip (conf=0.15)..."
+                )
                 bott_start = int(veh_crop.shape[0] * 0.60)
                 bott_crop = veh_crop[bott_start:, :]
                 if bott_crop.size > 0:
@@ -646,7 +689,9 @@ def process_vehicle_detection(frame, gate_name: str):
                                 best_plate_box = np.array(
                                     [bx1, by1 + bott_start, bx2, by2 + bott_start]
                                 )
-                                print(f"[DEBUG] Bottom-strip retry: plate found conf={conf:.2f} aspect={aspect:.2f}")
+                                print(
+                                    f"[DEBUG] Bottom-strip retry: plate found conf={conf:.2f} aspect={aspect:.2f}"
+                                )
 
             # ---------------------------------------------------------------
             # OCR bypass for Bus/Truck — last resort when plate_detector
@@ -683,7 +728,7 @@ def process_vehicle_detection(frame, gate_name: str):
                 # WHY STOP EARLY: As soon as a plate is found, we break.
                 #   Best case = 1 OCR call (~200ms). Worst = 3 (~600ms).
                 for idx, frac in enumerate([0.80, 0.70, 0.60]):
-                    ys    = int(crop_h_full * frac)
+                    ys = int(crop_h_full * frac)
                     strip = veh_crop[ys:, :]  # full width
 
                     if strip.size == 0 or strip.shape[0] < 5:
@@ -717,7 +762,9 @@ def process_vehicle_detection(frame, gate_name: str):
             # here when it is None causes the 'NoneType not subscriptable' crash.
             if best_plate_box is None:
                 if not detected_plates:
-                    print(f"[DEBUG] No plate found inside {vehicle_type} crop. Skipping.")
+                    print(
+                        f"[DEBUG] No plate found inside {vehicle_type} crop. Skipping."
+                    )
                 continue  # skip coord conversion — always safe when box is None
 
             # Convert coords from expanded-crop space back to full frame space
@@ -827,7 +874,9 @@ def process_vehicle_detection(frame, gate_name: str):
     # Empty frames cost ~80ms then skip instantly. No full-frame PaddleOCR,
     # so no freeze is possible.
     if not detected_plates:
-        print("[DEBUG] No vehicles detected by YOLO. Running plate_detector on full frame...")
+        print(
+            "[DEBUG] No vehicles detected by YOLO. Running plate_detector on full frame..."
+        )
         fallback_plate_results = plate_detector.predict(
             proc_frame, device=YOLO_DEVICE, conf=0.4, verbose=False
         )
@@ -886,9 +935,16 @@ def process_vehicle_detection(frame, gate_name: str):
                 plate_text = parse_ocr_results(paddle_res)
 
                 if len(plate_text) > 3:
-                    detected_plates.append((plate_text, "Unknown"))
-                    print(f"[DETECTION] Fallback plate: {plate_text} | Gate: {gate_name}")
-                    cv2.rectangle(proc_frame, (fpx1, fpy1), (fpx2, fpy2), (0, 165, 255), 2)
+                    # A vehicle with a valid Indian plate number is a registered vehicle
+                    # — NOT truly unknown. Label as "Car" (the most common vehicle type
+                    # that YOLO misses when it is partially occluded or too close to camera).
+                    detected_plates.append((plate_text, "Car"))
+                    print(
+                        f"[DETECTION] Fallback plate: {plate_text} | Type: Car | Gate: {gate_name}"
+                    )
+                    cv2.rectangle(
+                        proc_frame, (fpx1, fpy1), (fpx2, fpy2), (0, 165, 255), 2
+                    )
                     cv2.putText(
                         proc_frame,
                         plate_text,
@@ -1525,4 +1581,5 @@ if __name__ == "__main__":
     import uvicorn
 
     uvicorn.run(app, host="0.0.0.0", port=8000)
-# end of the program1
+# final
+
