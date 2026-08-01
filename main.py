@@ -4,6 +4,7 @@ import time
 import json
 import asyncio
 from typing import List, Dict
+from pydantic import BaseModel
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -1574,6 +1575,34 @@ async def mark_exit(req: MarkExitRequest):
     return {
         "status": "success",
         "message": f"Marked {plate} as OUT at {exit_time_12hr}",
+    }
+
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+USERS_DB = {
+    "gateadmin": {"password": "admin123", "role": "ADMIN", "name": "Chief Security Admin"},
+    "maingate_pc": {"password": "gate123", "role": "MAIN_GATE", "name": "Main Gate Terminal"},
+    "transport_mgr": {"password": "transport123", "role": "TRANSPORT", "name": "Transport Manager"}
+}
+
+
+@app.post("/login")
+async def login(req: LoginRequest):
+    user = USERS_DB.get(req.username.strip())
+    if not user or user["password"] != req.password.strip():
+        from fastapi import HTTPException
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+
+    return {
+        "status": "success",
+        "username": req.username,
+        "name": user["name"],
+        "role": user["role"]
     }
 
 

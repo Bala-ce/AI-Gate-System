@@ -14,7 +14,7 @@ timeout /t 5 /nobreak >nul
 
 :: 4. Open the frontend index.html in the default browser
 echo Opening Frontend Dashboard...
-start "" "index.html"
+start "" "login.html"
 
 echo System is running!
 pause

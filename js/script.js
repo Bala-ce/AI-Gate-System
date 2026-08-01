@@ -1,3 +1,33 @@
+document.addEventListener("DOMContentLoaded", () => {
+    const isLoggedIn = localStorage.getItem("isLoggedIn");
+    const userRole = localStorage.getItem("userRole");
+
+    if (!isLoggedIn || !userRole) {
+        window.location.href = "login.html";
+        return;
+    }
+
+    applyRolePermissions(userRole);
+});
+
+function applyRolePermissions(role) {
+    const manualEntryBtn = document.getElementById("manual-entry-btn");
+    const aiControls = document.getElementById("ai-controls");
+
+    if (role === "TRANSPORT") {
+        if (manualEntryBtn) manualEntryBtn.style.display = "none";
+        if (aiControls) aiControls.style.display = "none";
+    } else if (role === "MAIN_GATE" || role === "ADMIN") {
+        if (manualEntryBtn) manualEntryBtn.style.display = "block";
+        if (aiControls) aiControls.style.display = "block";
+    }
+}
+
+function logout() {
+    localStorage.clear();
+    window.location.href = "login.html";
+}
+
 /**
  * AI Automated Vehicle Gate Registration System Dashboard
  * Main Script Logic
