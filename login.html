@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Secure Login</title>
+    <link rel="stylesheet" href="login.css" />
+  </head>
+  <body>
+    <main class="page-shell">
+      <section class="login-card" aria-labelledby="login-title">
+        <div class="brand-block">
+          <div class="brand-mark">G</div>
+          <div>
+            <h1 id="login-title">Gate Access</h1>
+            <p>Secure operator sign-in</p>
+          </div>
+        </div>
+
+        <form id="loginForm" class="login-form">
+          <label class="field-label" for="username">Username</label>
+          <input
+            id="username"
+            name="username"
+            type="text"
+            placeholder="Enter username"
+            autocomplete="username"
+          />
+
+          <label class="field-label" for="password">Password</label>
+          <input
+            id="password"
+            name="password"
+            type="password"
+            placeholder="Enter password"
+            autocomplete="current-password"
+          />
+
+          <button type="submit" class="login-button">Login</button>
+        </form>
+
+        <p class="footer-note">Protected access for the smart gate system</p>
+      </section>
+    </main>
+
+    <script src="login.js"></script>
+  </body>
+</html>

@@ -476,8 +476,8 @@ if (sidebar && btnOpenSidebar && btnCloseSidebar) {
  */
 const themeToggleBtn = document.getElementById('theme-toggle-btn');
 if (themeToggleBtn) {
-    // Load saved theme preference — default is dark mode on first visit
-    const savedTheme = localStorage.getItem('app-theme') || 'dark';
+    // Load saved theme preference
+    const savedTheme = localStorage.getItem('app-theme') || 'light';
     if (savedTheme === 'dark') {
         document.documentElement.setAttribute('data-theme', 'dark');
         const icon = themeToggleBtn.querySelector('i');
