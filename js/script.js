@@ -1,25 +1,57 @@
 document.addEventListener("DOMContentLoaded", () => {
     const isLoggedIn = localStorage.getItem("isLoggedIn");
     const userRole = localStorage.getItem("userRole");
+    const userName = localStorage.getItem("userName");
 
     if (!isLoggedIn || !userRole) {
         window.location.href = "login.html";
         return;
     }
 
+    const loggedInUserElem = document.getElementById("logged-in-user");
+    if (loggedInUserElem) {
+        loggedInUserElem.textContent = `${userName} (${userRole})`;
+    }
+
+    const btnLogout = document.getElementById("btn-logout");
+    if (btnLogout) {
+        btnLogout.addEventListener("click", logout);
+    }
+
     applyRolePermissions(userRole);
 });
 
 function applyRolePermissions(role) {
-    const manualEntryBtn = document.getElementById("manual-entry-btn");
-    const aiControls = document.getElementById("ai-controls");
+    const manualEntryBtn = document.getElementById("btn-manual-entry");
+    
+    // Entry gate controls
+    const startCaptureEntry = document.getElementById("btn-start-capture-entry");
+    const stopCaptureEntry = document.getElementById("btn-stop-capture-entry");
+    
+    // Exit gate controls
+    const startCaptureExit = document.getElementById("btn-start-capture");
+    const stopCaptureExit = document.getElementById("btn-stop-capture");
 
     if (role === "TRANSPORT") {
         if (manualEntryBtn) manualEntryBtn.style.display = "none";
-        if (aiControls) aiControls.style.display = "none";
+        
+        if (startCaptureEntry) startCaptureEntry.style.display = "none";
+        if (stopCaptureEntry) stopCaptureEntry.style.display = "none";
+        
+        if (startCaptureExit) startCaptureExit.style.display = "none";
+        if (stopCaptureExit) stopCaptureExit.style.display = "none";
+        
+        document.body.classList.add("role-transport");
     } else if (role === "MAIN_GATE" || role === "ADMIN") {
-        if (manualEntryBtn) manualEntryBtn.style.display = "block";
-        if (aiControls) aiControls.style.display = "block";
+        if (manualEntryBtn) manualEntryBtn.style.display = "";
+        
+        if (startCaptureEntry) startCaptureEntry.style.display = "";
+        if (stopCaptureEntry) stopCaptureEntry.style.display = "";
+        
+        if (startCaptureExit) startCaptureExit.style.display = "";
+        if (stopCaptureExit) stopCaptureExit.style.display = "";
+        
+        document.body.classList.remove("role-transport");
     }
 }
 
@@ -211,7 +243,7 @@ function publishVehicleEntry(vehicle) {
         <td class="py-1.5 px-4 text-center">
             <button data-plate="${vehicle.plate}" data-status="${vehicle.status}"
                 onclick="openEditModal('${vehicle.plate}', this.dataset.status)"
-                class="inline-flex items-center gap-1.5 text-blue-300 hover:text-white bg-blue-600/20 hover:bg-blue-600/40 border border-blue-500/40 hover:border-blue-400 px-2.5 py-1 rounded-md text-[11px] font-semibold tracking-wide transition-all duration-200 shadow-sm hover:shadow-[0_0_8px_rgba(96,165,250,0.4)] focus:outline-none"
+                class="edit-action-btn inline-flex items-center gap-1.5 text-blue-300 hover:text-white bg-blue-600/20 hover:bg-blue-600/40 border border-blue-500/40 hover:border-blue-400 px-2.5 py-1 rounded-md text-[11px] font-semibold tracking-wide transition-all duration-200 shadow-sm hover:shadow-[0_0_8px_rgba(96,165,250,0.4)] focus:outline-none"
                 title="Edit Entry">
                 <i class="fa-solid fa-pen-to-square text-[10px]"></i> Edit
             </button>
